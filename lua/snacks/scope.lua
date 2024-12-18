@@ -62,6 +62,8 @@ local defaults = {
     field_blocks = {
       "local_declaration",
     },
+    -- should treesitter injections be used
+    include_injections = false,
   },
   -- These keymaps will only be set if the `scope` plugin is enabled.
   -- Alternatively, you can set them manually in your config,
@@ -161,8 +163,9 @@ end
 
 ---@generic T: snacks.scope.scope
 ---@param self T
+---@param opts snacks.scope.Opts
 ---@return T
-function Scope:inner()
+function Scope:inner(opts)
   error("not implemented")
 end
 
@@ -222,7 +225,8 @@ function IndentScope._expand(line, indent, up)
 end
 
 -- Inner indent scope is all lines with higher indent than the current scope
-function IndentScope:inner()
+---@param opts snacks.scope.Opts
+function IndentScope:inner(opts)
   local from, to, indent = nil, nil, math.huge
   for l = self.from, self.to do
     local i, il = IndentScope.get_indent(vim.fn.nextnonblank(l))
@@ -410,7 +414,10 @@ function TSScope:find(opts)
     (vim.fn.getline(line):find("%S") or 1) - 1, -- find first non-space character
   }
 
-  local node = vim.treesitter.get_node({ pos = pos, bufnr = opts.buf, lang = lang })
+  -- opts = Snacks.config.get("scope", defaults, opts or {}) --[[ @as snacks.scope.Opts ]]
+  local include_injections = opts.treesitter.include_injections or false
+  local node =
+    vim.treesitter.get_node({ pos = pos, bufnr = opts.buf, lang = lang, ignore_injections = not include_injections })
   if not node then
     return
   end
@@ -441,12 +448,15 @@ end
 
 -- Inner treesitter scope includes all lines for which the node
 -- has a start position lower than the start of the scope.
-function TSScope:inner()
+---@param opts snacks.scope.Opts
+function TSScope:inner(opts)
+  local include_injections = opts.treesitter.include_injections or false
   local from, to, indent = nil, nil, math.huge
   for l = self.from + 1, self.to do
     if l == vim.fn.nextnonblank(l) then
       local col = (vim.fn.getline(l):find("%S") or 1) - 1
-      local node = vim.treesitter.get_node({ pos = { l - 1, col }, bufnr = self.buf })
+      local node =
+        vim.treesitter.get_node({ pos = { l - 1, col }, bufnr = self.buf, ignore_injections = not include_injections })
       local s = TSScope:new({ buf = self.buf, node = node }, self.opts):fix()
       if s and s.from > self.from and s.to <= self.to then
         from = from or l
@@ -718,7 +728,7 @@ function M.textobject(opts)
     return opts.notify ~= false and Snacks.notify.warn("No scope in range")
   end
 
-  scope = inner and scope:inner() or scope
+  scope = inner and scope:inner(opts) or scope
   -- determine scope range
   local from, to =
     { scope.from, opts.linewise and 0 or vim.fn.indent(scope.from) },
